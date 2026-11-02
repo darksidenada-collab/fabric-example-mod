@@ -1,0 +1,146 @@
+package com.example;
+
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.hud.InGameHud;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.render.entity.PlayerEntityRenderer;
+import net.minecraft.client.util.InputUtil;
+import net.minecraft.text.Text;
+import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+// ==========================================
+// 1. الكور الرئيسي للـ Mod الإطلاق والتحكم
+// ==========================================
+public class MyPackCore implements ModInitializer {
+    public static final String MOD_ID = "mypackcore";
+    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+    private static KeyBinding openCoreGuiKey;
+    public static boolean isHudEnabled = true;
+
+    @Override
+    public void onInitialize() {
+        LOGGER.info("MyPackCore تم إطلاق وتفعيل الكور الأسطوري الحصري الخاص بك بنجاح على 1.21.1!");
+
+        // تسجيل زر اختصار لفتح واجهة الكور (حرف M)
+        openCoreGuiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.mypackcore.open_gui",
+            InputUtil.Type.KEYSYM,
+            GLFW.GLFW_KEY_M,
+            "category.mypackcore.general"
+        ));
+
+        // مراقبة الضغط على الزر لفتح الواجهة أثناء اللعب
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            while (openCoreGuiKey.wasPressed()) {
+                client.setScreen(new MyCoreScreen());
+            }
+        });
+    }
+
+    // ==========================================
+    // 2. الواجهة الرسومية الأسطورية المخصصة (GUI)
+    // ==========================================
+    public static class MyCoreScreen extends Screen {
+        public MyCoreScreen() {
+            super(Text.literal("§6لوحة تحكم الكور المطور §7- PvP Core"));
+        }
+
+        @Override
+        protected void init() {
+            int centerX = this.width / 2;
+            int centerY = this.height / 2;
+
+            // زر تفعيل وتعطيل الـ PvP HUD
+            this.addSelectableChild(ButtonWidget.builder(
+                Text.literal(MyPackCore.isHudEnabled ? "§aتعطيل الـ PvP HUD" : "§cتفعيل الـ PvP HUD"),
+                button -> {
+                    MyPackCore.isHudEnabled = !MyPackCore.isHudEnabled;
+                    button.setMessage(Text.literal(MyPackCore.isHudEnabled ? "§aتعطيل الـ PvP HUD" : "§cتفعيل الـ PvP HUD"));
+                }
+            ).dimensions(centerX - 100, centerY - 40, 200, 20).build());
+
+            // زر دعوة الصديق ونظام الأصدقاء (Friend Invite)
+            this.addSelectableChild(ButtonWidget.builder(
+                Text.literal("§b➕ إرسال دعوة صديق (Invite Friend)"),
+                button -> {
+                    if (this.client != null && this.client.player != null) {
+                        this.client.player.sendMessage(Text.literal("§6[MyCore] §aتم تشغيل نظام الدعوات التنافسي! اكتب اسم اللاعب في الشات لتثبيته كصديق."), false);
+                        this.client.setScreen(null);
+                    }
+                }
+            ).dimensions(centerX - 100, centerY, 200, 20).build());
+
+            // زر إغلاق القائمة
+            this.addSelectableChild(ButtonWidget.builder(
+                Text.literal("§cإغلاق"),
+                button -> this.client.setScreen(null)
+            ).dimensions(centerX - 100, centerY + 40, 200, 20).build());
+        }
+
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            this.renderBackground(context, mouseX, mouseY, delta);
+            context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, 20, 0xFFFFFF);
+            super.render(context, mouseX, mouseY, delta);
+        }
+    }
+
+    // ==========================================
+    // 3. ميكسين إضافة أول حرف من اسم اللاعب (Prefix)
+    // ==========================================
+    @Mixin(PlayerEntityRenderer.class)
+    public static class PlayerNameMixin {
+        @ModifyVariable(method = "renderLabelIfPresent", at = @At("HEAD"), argsOnly = true)
+        private Text modifyPlayerNameTag(Text text, AbstractClientPlayerEntity player) {
+            if (player != null) {
+                String originalName = player.getName().getString();
+                if (!originalName.isEmpty()) {
+                    String firstChar = String.valueOf(originalName.charAt(0)).toUpperCase();
+                    // طباعة الحرف الأول ذهبي ومحاط بأقواس خضراء بجانب اسم اللاعب
+                    return Text.literal("§2[§6" + firstChar + "§2] §r" + originalName);
+                }
+            }
+            return text;
+        }
+    }
+
+    // ==========================================
+    // 4. ميكسين الـ PvP HUD وعرض الفريمات والإحداثيات
+    // ==========================================
+    @Mixin(InGameHud.class)
+    public static class InGameHudMixin {
+        @Inject(method = "render", at = @At("TAIL"))
+        private void drawPvPHUD(DrawContext context, float tickDelta, CallbackInfo ci) {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client == null || client.options.hudHidden || !MyPackCore.isHudEnabled) return;
+
+            // حساب الـ FPS الذكي للأداء العالي بدون بطء أو دروب فريم
+            int currentFPS = client.getCurrentFps();
+
+            if (client.player != null) {
+                int posX = (int) client.player.getX();
+                int posY = (int) client.player.getY();
+                int posZ = (int) client.player.getZ();
+
+                // رسم الهود الأنيق في أعلى اليسار على هاتف بوجاف لانشر
+                context.drawTextWithShadow(client.textRenderer, "§6[MyCore] §fFPS: §a" + currentFPS, 10, 10, 0xFFFFFF);
+                context.drawTextWithShadow(client.textRenderer, "§6XYZ: §f" + posX + " " + posY + " " + posZ, 10, 22, 0xFFFFFF);
+                context.drawTextWithShadow(client.textRenderer, "§7اضغط [M] لفتح لوحة التحكم المخصصة", 10, 34, 0xFFFFFF);
+            }
+        }
+    }
+}
